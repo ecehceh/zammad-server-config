@@ -491,3 +491,5 @@ docker compose logs -f reverse-proxy-ssl
 - RAM: **minimal 4 GB** (rekomendasi 8 GB)
 - CPU: SSE4.2 support (hampir semua CPU modern)
 - Storage: minimal 10 GB
+#   z a m m a d - s e r v e r - c o n f i g  
+ 
