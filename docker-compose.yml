@@ -1,0 +1,280 @@
+# ============================================================
+#  Zammad - Docker Compose Configuration
+#  Dengan isolasi jaringan: network "backend" (DB) dan "frontend" (App)
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # 1. INIT: Inisialisasi database & konfigurasi awal Zammad
+  # ----------------------------------------------------------
+  zammad-init:
+    image: zammad/zammad-docker-compose:latest
+    command: [ "zammad-init" ]
+    container_name: zammad-init
+    restart: on-failure
+    depends_on:
+      zammad-postgresql:
+        condition: service_healthy
+      zammad-elasticsearch:
+        condition: service_healthy
+      zammad-memcached:
+        condition: service_started
+      zammad-redis:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - zammad-storage:/opt/zammad/storage
+    networks:
+      - backend
+      - frontend
+
+  # ----------------------------------------------------------
+  # 2. NGINX: Web server / reverse proxy internal Zammad
+  #    (Service "web" yang mengekspos port ke host)
+  # ----------------------------------------------------------
+  zammad-nginx:
+    image: zammad/zammad-docker-compose:latest
+    command: [ "zammad-nginx" ]
+    container_name: zammad-nginx
+    restart: unless-stopped
+    expose:
+      - "8080" # Internal saja, akses publik lewat reverse-proxy-ssl
+    depends_on:
+      zammad-init:
+        condition: service_completed_successfully
+      zammad-railsserver:
+        condition: service_started
+      zammad-websocket:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - zammad-storage:/opt/zammad/storage:ro
+    networks:
+      - frontend
+      - backend # Dibutuhkan: check_zammad_ready query langsung ke PostgreSQL
+      - proxy # Agar bisa diakses oleh reverse-proxy-ssl
+
+  # ----------------------------------------------------------
+  # 3. RAILSSERVER: Core aplikasi Zammad (Ruby on Rails)
+  # ----------------------------------------------------------
+  zammad-railsserver:
+    image: zammad/zammad-docker-compose:latest
+    command: [ "zammad-railsserver" ]
+    container_name: zammad-railsserver
+    restart: unless-stopped
+    depends_on:
+      zammad-init:
+        condition: service_completed_successfully
+      zammad-memcached:
+        condition: service_started
+      zammad-redis:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - zammad-storage:/opt/zammad/storage
+    networks:
+      - backend # Akses ke database (PostgreSQL, Elasticsearch)
+      - frontend # Akses ke nginx & websocket
+
+  # ----------------------------------------------------------
+  # 4. WEBSOCKET: Koneksi real-time untuk notifikasi & chat
+  # ----------------------------------------------------------
+  zammad-websocket:
+    image: zammad/zammad-docker-compose:latest
+    command: [ "zammad-websocket" ]
+    container_name: zammad-websocket
+    restart: unless-stopped
+    depends_on:
+      zammad-init:
+        condition: service_completed_successfully
+      zammad-railsserver:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - zammad-storage:/opt/zammad/storage:ro
+    networks:
+      - frontend # Hanya perlu berkomunikasi dengan railsserver & nginx
+
+  # ----------------------------------------------------------
+  # 5. SCHEDULER: Background jobs Zammad (email, notifikasi, dll)
+  # ----------------------------------------------------------
+  zammad-scheduler:
+    image: zammad/zammad-docker-compose:latest
+    command: [ "zammad-scheduler" ]
+    container_name: zammad-scheduler
+    restart: unless-stopped
+    depends_on:
+      zammad-init:
+        condition: service_completed_successfully
+      zammad-railsserver:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - zammad-storage:/opt/zammad/storage
+    networks:
+      - backend
+      - frontend
+
+  # ----------------------------------------------------------
+  # REVERSE PROXY OPTION A: Nginx SSL/TLS termination
+  #    Aktifkan dengan: docker compose --profile nginx up -d
+  #    Menerima HTTPS (443) & HTTP (80) dari luar,
+  #    meneruskan ke zammad-nginx secara internal (HTTP).
+  # ----------------------------------------------------------
+  reverse-proxy-ssl:
+    image: nginx:alpine
+    container_name: zammad-reverse-proxy-nginx
+    restart: unless-stopped
+    profiles: ["nginx"]
+    ports:
+      - "80:80"   # HTTP  → redirect ke HTTPS
+      - "443:443" # HTTPS → SSL termination di sini
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - zammad-nginx
+    networks:
+      - proxy
+
+  # ----------------------------------------------------------
+  # REVERSE PROXY OPTION B: Traefik SSL/TLS termination
+  #    Aktifkan dengan: docker compose --profile traefik up -d
+  #    Menerima HTTPS (443) & HTTP (80) dari luar (→ redirect),
+  #    meneruskan ke zammad-nginx via file-based dynamic config.
+  # ----------------------------------------------------------
+  traefik:
+    image: traefik:v3.0
+    container_name: zammad-reverse-proxy-traefik
+    restart: unless-stopped
+    profiles: ["traefik"]
+    ports:
+      - "80:80"   # HTTP  → auto-redirect ke HTTPS oleh Traefik
+      - "443:443" # HTTPS → SSL termination di sini
+      - "8088:8080" # Traefik dashboard (opsional, bisa dihapus di produksi)
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./nginx/ssl:/etc/traefik/ssl:ro # Reuse sertifikat SSL yang sama
+    depends_on:
+      - zammad-nginx
+    networks:
+      - proxy
+
+  # ----------------------------------------------------------
+  # ----------------------------------------------------------
+  # 6. POSTGRESQL: Database utama Zammad
+  #    ISOLASI: Hanya di jaringan "backend"
+  # ----------------------------------------------------------
+  zammad-postgresql:
+    image: postgres:15-alpine
+    container_name: zammad-postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: zammad_production
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d zammad_production" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # ----------------------------------------------------------
+  # 7. ELASTICSEARCH: Search engine untuk Zammad
+  #    ISOLASI: Hanya di jaringan "backend"
+  # ----------------------------------------------------------
+  zammad-elasticsearch:
+    image: elasticsearch:8.12.2
+    container_name: zammad-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'" ]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - backend # HANYA di backend — terisolasi dari jaringan aplikasi publik
+
+  # ----------------------------------------------------------
+  # 8. MEMCACHED: Cache untuk session & performa
+  #    ISOLASI: Hanya di jaringan "backend"
+  # ----------------------------------------------------------
+  zammad-memcached:
+    image: memcached:1.6-alpine
+    container_name: zammad-memcached
+    command: memcached -m 256M
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ----------------------------------------------------------
+  # 9. REDIS: Queue & pub/sub untuk background jobs
+  #    ISOLASI: Hanya di jaringan "backend"
+  # ----------------------------------------------------------
+  zammad-redis:
+    image: redis:7-alpine
+    container_name: zammad-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+
+# ==============================================================
+#  VOLUMES: Persistent data storage
+# ==============================================================
+volumes:
+  elasticsearch-data:
+    driver: local
+  postgresql-data:
+    driver: local
+  redis-data:
+    driver: local
+  zammad-storage:
+    driver: local
+  ssl-certs:
+    driver: local
+
+# ==============================================================
+#  NETWORKS: Isolasi jaringan
+#
+#  [backend]  → Database layer: PostgreSQL, Elasticsearch,
+#               Memcached, Redis
+#               Hanya container yang butuh akses DB yang masuk.
+#
+#  [frontend] → Application layer: Nginx, Railsserver,
+#               Websocket, Scheduler
+#               Menghadap ke pengguna / port host.
+# ==============================================================
+networks:
+  backend:
+    driver: bridge
+    internal: true # ← Tidak punya akses internet langsung
+    name: zammad-backend
+
+  frontend:
+    driver: bridge
+    name: zammad-frontend
+
+  proxy:
+    driver: bridge
+    name: zammad-proxy # Jaringan khusus antara reverse proxy dan zammad-nginx

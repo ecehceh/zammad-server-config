@@ -1,0 +1,89 @@
+# ============================================================
+#  Traefik - Dynamic Configuration (hot-reloadable)
+#  Routing, middleware, service, dan TLS untuk Zammad.
+# ============================================================
+
+http:
+
+  # ── Middlewares ──────────────────────────────────────────
+  middlewares:
+
+    # Security headers (setara dengan add_header di Nginx)
+    security-headers:
+      headers:
+        # HSTS: paksa browser gunakan HTTPS selama ~2 tahun
+        stsSeconds: 63072000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+
+        # Cegah clickjacking
+        frameDeny: true
+
+        # Cegah MIME sniffing
+        contentTypeNosniff: true
+
+        # Proteksi XSS bawaan browser
+        browserXssFilter: true
+
+        # Referrer policy
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+        # Beritahu Zammad bahwa request asalnya HTTPS
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+
+    # WebSocket upgrade headers (diperlukan untuk real-time Zammad)
+    websocket-headers:
+      headers:
+        customRequestHeaders:
+          Connection: "Upgrade"
+          Upgrade: "websocket"
+
+  # ── Routers ─────────────────────────────────────────────
+  routers:
+    zammad:
+      # Cocokkan semua host — ganti "localhost" dengan domain Anda di produksi
+      rule: "Host(`localhost`)"
+      entryPoints:
+        - websecure          # Hanya terima lewat HTTPS
+      service: zammad-service
+      middlewares:
+        - security-headers   # Pasang security headers
+        - websocket-headers  # Support WebSocket real-time
+      tls:
+        # Gunakan sertifikat dari blok tls.certificates di bawah
+        {}
+
+  # ── Services ────────────────────────────────────────────
+  services:
+    zammad-service:
+      loadBalancer:
+        servers:
+          - url: "http://zammad-nginx:8080"  # Forward ke Zammad internal
+        passHostHeader: true
+        # Health check opsional:
+        # healthCheck:
+        #   path: /
+        #   interval: "30s"
+        #   timeout: "5s"
+
+# ── TLS Certificates ────────────────────────────────────────
+# Menggunakan sertifikat self-signed yang sama dengan Nginx
+tls:
+  certificates:
+    - certFile: /etc/traefik/ssl/zammad.crt
+      keyFile: /etc/traefik/ssl/zammad.key
+
+  # Hardening TLS: hanya protokol & cipher modern
+  options:
+    default:
+      minVersion: VersionTLS12
+      maxVersion: VersionTLS13
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305

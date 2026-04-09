@@ -1,0 +1,39 @@
+# ============================================================
+#  Traefik - Static Configuration
+#  File ini dimuat saat Traefik pertama kali start.
+#  Untuk routing dinamis, lihat: ./dynamic/zammad.yml
+# ============================================================
+
+# ── API & Dashboard ──────────────────────────────────────────
+api:
+  dashboard: true   # Akses di http://localhost:8088/dashboard/
+  insecure: true    # Ganti ke false jika dashboard dilindungi auth
+
+# ── Entry Points ─────────────────────────────────────────────
+entryPoints:
+  # Port 80: HTTP — otomatis redirect ke HTTPS
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true   # 301 redirect
+
+  # Port 443: HTTPS — SSL termination di sini
+  websecure:
+    address: ":443"
+
+# ── Providers ────────────────────────────────────────────────
+providers:
+  # File provider: konfigurasi routing dibaca dari folder dynamic/
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true   # hot-reload jika file berubah tanpa restart container
+
+# ── Logging ──────────────────────────────────────────────────
+log:
+  level: INFO   # DEBUG | INFO | WARN | ERROR
+
+accessLog: {}   # Aktifkan access log (hapus baris ini jika tidak perlu)
