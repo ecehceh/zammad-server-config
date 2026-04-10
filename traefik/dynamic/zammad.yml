@@ -43,10 +43,10 @@ http:
   # ── Routers ─────────────────────────────────────────────
   routers:
     zammad:
-      # Cocokkan semua host — ganti "localhost" dengan domain Anda di produksi
-      rule: "Host(`localhost`)"
+      # Routing ke Zammad berdasarkan IP server (172.21.3.99)
+      rule: "Host(`172.21.3.99`)"
       entryPoints:
-        - websecure          # Hanya terima lewat HTTPS
+        - websecure          # Hanya terima lewat HTTPS (port 443)
       service: zammad-service
       middlewares:
         - security-headers   # Pasang security headers

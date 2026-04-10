@@ -1,13 +1,17 @@
 # ============================================================
-#  Traefik - Static Configuration
+#  Traefik - Static Configuration (Docker Swarm Mode)
 #  File ini dimuat saat Traefik pertama kali start.
-#  Untuk routing dinamis, lihat: ./dynamic/zammad.yml
+#  Untuk routing dinamis Zammad, lihat: ./dynamic/zammad.yml
+#
+#  Versi  : Traefik v3.0
+#  Mode   : Docker Swarm
+#  Server : 172.21.3.99
 # ============================================================
 
 # ── API & Dashboard ──────────────────────────────────────────
 api:
-  dashboard: true   # Akses di http://localhost:8088/dashboard/
-  insecure: true    # Ganti ke false jika dashboard dilindungi auth
+  dashboard: true   # Akses di http://172.21.3.99:8088/dashboard/
+  insecure: true    # Dashboard via HTTP (tanpa auth, cocok untuk sandbox)
 
 # ── Entry Points ─────────────────────────────────────────────
 entryPoints:
@@ -19,7 +23,7 @@ entryPoints:
         entryPoint:
           to: websecure
           scheme: https
-          permanent: true   # 301 redirect
+          permanent: true   # 301 Permanent Redirect
 
   # Port 443: HTTPS — SSL termination di sini
   websecure:
@@ -27,7 +31,17 @@ entryPoints:
 
 # ── Providers ────────────────────────────────────────────────
 providers:
-  # File provider: konfigurasi routing dibaca dari folder dynamic/
+  # Docker Swarm provider: auto-discovery service via labels
+  # swarmMode: true → Traefik membaca service Swarm (bukan container biasa)
+  # exposedByDefault: false → Service hanya aktif jika ada label traefik.enable=true
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    swarmMode: true
+    exposedByDefault: false
+    network: zammad-proxy    # Network default untuk Traefik → service
+
+  # File provider: routing statik untuk Zammad + konfigurasi TLS
+  # Digunakan karena zammad-nginx tidak menggunakan labels
   file:
     directory: /etc/traefik/dynamic
     watch: true   # hot-reload jika file berubah tanpa restart container
@@ -36,4 +50,4 @@ providers:
 log:
   level: INFO   # DEBUG | INFO | WARN | ERROR
 
-accessLog: {}   # Aktifkan access log (hapus baris ini jika tidak perlu)
+accessLog: {}   # Aktifkan access log
