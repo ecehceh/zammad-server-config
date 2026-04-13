@@ -325,6 +325,8 @@ services:
   # ----------------------------------------------------------
   traefik:
     image: traefik:v3.0
+    environment:
+      - DOCKER_API_VERSION=1.41
     deploy:
       replicas: 1
       restart_policy:
