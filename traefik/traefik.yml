@@ -35,6 +35,7 @@ providers:
   # exposedByDefault: false → container hanya aktif jika ada label traefik.enable=true
   docker:
     endpoint: "unix:///var/run/docker.sock"
+    swarmMode: true          # Wajib untuk Docker Swarm (docker stack deploy)
     exposedByDefault: false
     network: zammad-proxy    # Network default untuk Traefik → service
 
