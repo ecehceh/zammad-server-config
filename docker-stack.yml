@@ -324,7 +324,7 @@ services:
   #     - Port 8088: Traefik dashboard (akses via http://172.21.3.99:8088)
   # ----------------------------------------------------------
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3
     environment:
       - DOCKER_API_VERSION=1.41
     deploy:
