@@ -8,10 +8,7 @@
 #  Server : 172.21.3.99
 # ============================================================
 
-# ── API & Dashboard ──────────────────────────────────────────
-api:
-  dashboard: true   # Akses di http://172.21.3.99:8088/dashboard/
-  insecure: true    # Dashboard via HTTP (tanpa auth, cocok untuk sandbox)
+# Dashboard dimatikan sesuai aturan firewall
 
 # ── Entry Points ─────────────────────────────────────────────
 entryPoints:

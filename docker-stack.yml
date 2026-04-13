@@ -346,10 +346,6 @@ services:
         published: 443
         protocol: tcp
         mode: host
-      - target: 8080
-        published: 8088
-        protocol: tcp
-        mode: host   # Dashboard Traefik
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
@@ -380,13 +376,9 @@ services:
           - node.role == manager
     ports:
       - target: 9000
-        published: 9000
+        published: 8080
         protocol: tcp
-        mode: host   # GUI Portainer (HTTP)
-      - target: 9443
-        published: 9443
-        protocol: tcp
-        mode: host   # GUI Portainer (HTTPS - built-in cert)
+        mode: host   # GUI Portainer (HTTP) melalui port 8080
     volumes:
       - portainer-data:/data
     networks:
