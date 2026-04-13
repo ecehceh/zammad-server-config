@@ -43,7 +43,8 @@ http:
   # ── Routers ─────────────────────────────────────────────
   routers:
     zammad:
-      # Routing ke Zammad berdasarkan IP server (172.21.3.99)
+      # Routing ke Zammad berdasarkan IP server
+      # Ganti dengan domain Anda jika sudah punya (contoh: zammad.example.com)
       rule: "Host(`172.21.3.99`)"
       entryPoints:
         - websecure          # Hanya terima lewat HTTPS (port 443)
@@ -69,7 +70,8 @@ http:
         #   timeout: "5s"
 
 # ── TLS Certificates ────────────────────────────────────────
-# Menggunakan sertifikat self-signed yang sama dengan Nginx
+# Sertifikat SSL disimpan di ./traefik/ssl/
+# Untuk self-signed: lihat README bagian "Generate SSL Certificate"
 tls:
   certificates:
     - certFile: /etc/traefik/ssl/zammad.crt

@@ -1,1 +1,8 @@
+# Secrets & environment
 .env
+
+# SSL Certificates (jangan pernah di-push ke repo publik!)
+traefik/ssl/*.crt
+traefik/ssl/*.key
+traefik/ssl/*.pem
+nginx/ssl/

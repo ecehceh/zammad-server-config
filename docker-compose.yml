@@ -1,6 +1,7 @@
 # ============================================================
 #  Zammad - Docker Compose Configuration
-#  Dengan isolasi jaringan: network "backend" (DB) dan "frontend" (App)
+#  Reverse proxy: Traefik v3 (SSL/TLS termination)
+#  Jaringan: "backend" (DB layer) dan "frontend" (App layer)
 # ============================================================
 
 services:
@@ -30,8 +31,8 @@ services:
       - frontend
 
   # ----------------------------------------------------------
-  # 2. NGINX: Web server / reverse proxy internal Zammad
-  #    (Service "web" yang mengekspos port ke host)
+  # 2. NGINX (internal): Web server bawaan Zammad
+  #    Tidak expose ke host — hanya Traefik yang boleh akses.
   # ----------------------------------------------------------
   zammad-nginx:
     image: zammad/zammad-docker-compose:latest
@@ -39,7 +40,7 @@ services:
     container_name: zammad-nginx
     restart: unless-stopped
     expose:
-      - "8080" # Internal saja, akses publik lewat reverse-proxy-ssl
+      - "8080" # Internal saja, akses publik lewat Traefik
     depends_on:
       zammad-init:
         condition: service_completed_successfully
@@ -53,7 +54,7 @@ services:
     networks:
       - frontend
       - backend # Dibutuhkan: check_zammad_ready query langsung ke PostgreSQL
-      - proxy # Agar bisa diakses oleh reverse-proxy-ssl
+      - proxy   # Agar bisa diakses oleh Traefik
 
   # ----------------------------------------------------------
   # 3. RAILSSERVER: Core aplikasi Zammad (Ruby on Rails)
@@ -94,7 +95,7 @@ services:
     volumes:
       - zammad-storage:/opt/zammad/storage:ro
     networks:
-      - frontend # Hanya perlu berkomunikasi dengan railsserver & nginx
+      - frontend # Berkomunikasi dengan railsserver & nginx
 
   # ----------------------------------------------------------
   # 5. SCHEDULER: Background jobs Zammad (email, notifikasi, dll)
@@ -117,52 +118,29 @@ services:
       - frontend
 
   # ----------------------------------------------------------
-  # REVERSE PROXY OPTION A: Nginx SSL/TLS termination
-  #    Aktifkan dengan: docker compose --profile nginx up -d
-  #    Menerima HTTPS (443) & HTTP (80) dari luar,
-  #    meneruskan ke zammad-nginx secara internal (HTTP).
-  # ----------------------------------------------------------
-  reverse-proxy-ssl:
-    image: nginx:alpine
-    container_name: zammad-reverse-proxy-nginx
-    restart: unless-stopped
-    profiles: ["nginx"]
-    ports:
-      - "80:80"   # HTTP  → redirect ke HTTPS
-      - "443:443" # HTTPS → SSL termination di sini
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - zammad-nginx
-    networks:
-      - proxy
-
-  # ----------------------------------------------------------
-  # REVERSE PROXY OPTION B: Traefik SSL/TLS termination
-  #    Aktifkan dengan: docker compose --profile traefik up -d
-  #    Menerima HTTPS (443) & HTTP (80) dari luar (→ redirect),
-  #    meneruskan ke zammad-nginx via file-based dynamic config.
+  # REVERSE PROXY: Traefik v3 — SSL/TLS termination
+  #    HTTP (80) → otomatis redirect ke HTTPS (443)
+  #    HTTPS (443) → forward ke zammad-nginx:8080
+  #    Dashboard: http://<server-ip>:8088/dashboard/
   # ----------------------------------------------------------
   traefik:
     image: traefik:v3.0
-    container_name: zammad-reverse-proxy-traefik
+    container_name: zammad-traefik
     restart: unless-stopped
-    profiles: ["traefik"]
     ports:
-      - "80:80"   # HTTP  → auto-redirect ke HTTPS oleh Traefik
-      - "443:443" # HTTPS → SSL termination di sini
-      - "8088:8080" # Traefik dashboard (opsional, bisa dihapus di produksi)
+      - "80:80"       # HTTP  → auto-redirect ke HTTPS
+      - "443:443"     # HTTPS → SSL termination di sini
+      - "8088:8080"   # Traefik dashboard (opsional, hapus di produksi)
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic:/etc/traefik/dynamic:ro
-      - ./nginx/ssl:/etc/traefik/ssl:ro # Reuse sertifikat SSL yang sama
+      - ./traefik/ssl:/etc/traefik/ssl:ro  # Sertifikat SSL (self-signed / Let's Encrypt)
     depends_on:
       - zammad-nginx
     networks:
       - proxy
 
-  # ----------------------------------------------------------
   # ----------------------------------------------------------
   # 6. POSTGRESQL: Database utama Zammad
   #    ISOLASI: Hanya di jaringan "backend"
@@ -251,8 +229,6 @@ volumes:
     driver: local
   zammad-storage:
     driver: local
-  ssl-certs:
-    driver: local
 
 # ==============================================================
 #  NETWORKS: Isolasi jaringan
@@ -261,9 +237,11 @@ volumes:
 #               Memcached, Redis
 #               Hanya container yang butuh akses DB yang masuk.
 #
-#  [frontend] → Application layer: Nginx, Railsserver,
+#  [frontend] → Application layer: zammad-nginx, Railsserver,
 #               Websocket, Scheduler
-#               Menghadap ke pengguna / port host.
+#
+#  [proxy]    → Jaringan khusus antara Traefik dan zammad-nginx
+#               Terisolasi dari layer DB maupun aplikasi internal.
 # ==============================================================
 networks:
   backend:
@@ -277,4 +255,4 @@ networks:
 
   proxy:
     driver: bridge
-    name: zammad-proxy # Jaringan khusus antara reverse proxy dan zammad-nginx
+    name: zammad-proxy # Jaringan khusus Traefik → zammad-nginx
