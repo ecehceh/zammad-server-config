@@ -35,6 +35,9 @@ services:
         delay: 10s
         max_attempts: 3
         window: 120s
+      placement:
+        constraints:
+          - node.role == worker
     depends_on:
       - zammad-postgresql
       - zammad-elasticsearch
@@ -80,6 +83,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == worker
     depends_on:
       - zammad-init
       - zammad-railsserver
@@ -123,6 +129,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == worker
     depends_on:
       - zammad-init
       - zammad-memcached
@@ -164,6 +173,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == worker
     depends_on:
       - zammad-init
       - zammad-railsserver
@@ -203,6 +215,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == worker
     depends_on:
       - zammad-init
       - zammad-railsserver
@@ -312,6 +327,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == manager
     networks:
       - backend
 
@@ -328,6 +346,9 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+      placement:
+        constraints:
+          - node.role == manager
     volumes:
       - redis-data:/data
     networks:
