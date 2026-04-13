@@ -61,7 +61,7 @@ http:
     zammad-service:
       loadBalancer:
         servers:
-          - url: "http://zammad_zammad-nginx:8080"  # Forward ke Zammad internal
+          - url: "http://zammad-nginx:8080"  # Forward ke Zammad internal
         passHostHeader: true
         # Health check opsional:
         # healthCheck:
