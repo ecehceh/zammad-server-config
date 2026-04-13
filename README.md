@@ -9,18 +9,21 @@ Zammad adalah platform helpdesk & ticketing open-source. Dokumentasi ini menjela
 ```
 project/
 ├── docker-compose.yml        ← Konfigurasi utama seluruh service
+├── docker-stack.yml          ← Konfigurasi Docker Swarm (via Portainer)
 ├── .env.example              ← Template environment variables
 ├── .env                      ← File env Anda (buat dari .env.example)
-├── nginx/                    ← [Profile: nginx] Reverse proxy Nginx
-│   ├── conf.d/
-│   │   └── zammad.conf       ← Konfigurasi Nginx reverse proxy + SSL
+├── traefik/                  ← Reverse proxy Traefik (SSL termination)
+│   ├── traefik.yml           ← Static config (entrypoints, providers)
+│   ├── dynamic/
+│   │   └── zammad.yml        ← Dynamic config (router, middleware, TLS)
 │   └── ssl/
-│       ├── zammad.crt        ← SSL Certificate (digunakan juga oleh Traefik)
-│       └── zammad.key        ← SSL Private Key (digunakan juga oleh Traefik)
-└── traefik/                  ← [Profile: traefik] Reverse proxy Traefik
-    ├── traefik.yml           ← Static config (entrypoints, providers)
-    └── dynamic/
-        └── zammad.yml        ← Dynamic config (router, middleware, TLS)
+│       ├── zammad.crt        ← SSL Certificate (self-signed / Let's Encrypt)
+│       └── zammad.key        ← SSL Private Key
+├── nginx/                    ← Konfigurasi Nginx (referensi / arsip)
+│   └── conf.d/
+│       └── zammad.conf       ← Nginx config (tidak dipakai sebagai reverse proxy)
+└── portainer/
+    └── README.md             ← Panduan deploy via Docker Swarm + Portainer
 ```
 
 ---
@@ -116,7 +119,7 @@ File `docker-compose.yml` menyatukan **9 service** dalam satu stack dengan depen
 [zammad-redis] ──────┘              └──→ [zammad-websocket]
                                     └──→ [zammad-scheduler]
                                                     ↓
-                                         [reverse-proxy-ssl]
+                                             [traefik]
                                           (port 80 / 443)
 ```
 
@@ -144,7 +147,7 @@ Project menggunakan **3 network Docker** yang saling terisolasi:
 INTERNET
     │
     ▼  port 80 / 443 (exposed ke host)
-[reverse-proxy-ssl]
+[traefik]
     │  network: proxy
     ▼
 [zammad-nginx:8080]   ← hanya expose internal, tidak ke host
@@ -163,8 +166,8 @@ INTERNET
 | Network | `internal` | Container yang masuk | Tujuan |
 |---|:---:|---|---|
 | `zammad-backend` | ✅ `true` | postgresql, elasticsearch, memcached, redis, railsserver, scheduler, init | Database layer — tidak bisa akses internet |
-| `zammad-frontend` | ❌ | nginx, railsserver, websocket, scheduler, init | Application layer — komunikasi antar service app |
-| `zammad-proxy` | ❌ | reverse-proxy-ssl, zammad-nginx | Jalur masuk dari internet ke nginx internal |
+| `zammad-frontend` | ❌ | zammad-nginx, railsserver, websocket, scheduler, init | Application layer — komunikasi antar service app |
+| `zammad-proxy` | ❌ | traefik, zammad-nginx | Jalur masuk dari internet ke zammad-nginx internal |
 
 #### Konfigurasi kritis — `backend` network terisolasi penuh:
 
@@ -185,13 +188,14 @@ Flag `internal: true` berarti container di network ini **tidak dapat melakukan r
 expose:
   - "8080"   # ← expose (antar container), BUKAN ports (ke host)
 
-# reverse-proxy-ssl — satu-satunya pintu masuk
+# traefik — satu-satunya pintu masuk dari internet
 ports:
-  - "80:80"    # HTTP  → redirect ke HTTPS
-  - "443:443"  # HTTPS → SSL termination
+  - "80:80"      # HTTP  → redirect ke HTTPS
+  - "443:443"    # HTTPS → SSL termination
+  - "8088:8080"  # Traefik dashboard
 ```
 
-Hanya `reverse-proxy-ssl` yang membuka port ke host. `zammad-nginx` hanya bisa diakses dari container lain di network `proxy`.
+Hanya `traefik` yang membuka port ke host. `zammad-nginx` hanya bisa diakses dari container lain di network `proxy`.
 
 ---
 
@@ -204,7 +208,7 @@ Hanya `reverse-proxy-ssl` yang membuka port ke host. `zammad-nginx` hanya bisa d
 | `zammad-railsserver` | Core aplikasi Ruby on Rails | backend + frontend |
 | `zammad-websocket` | Koneksi real-time (notifikasi, chat) | frontend |
 | `zammad-scheduler` | Background jobs (email, dll) | backend + frontend |
-| `reverse-proxy-ssl` | SSL termination, port 80/443 ke host | proxy |
+| `traefik` | Reverse proxy + SSL termination, port 80/443/8088 | proxy |
 | `zammad-postgresql` | Database utama | backend |
 | `zammad-elasticsearch` | Search engine full-text | backend |
 | `zammad-memcached` | Cache session & performa | backend |
@@ -332,85 +336,75 @@ Flag `:ro` (read-only) memastikan container Nginx **tidak bisa memodifikasi** fi
 
 ---
 
-## 🔄 Mengganti Reverse Proxy: Nginx ↔ Traefik
+## 🔄 Traefik sebagai Reverse Proxy
 
-Project ini mendukung **dua pilihan reverse proxy** yang bisa diganti kapan saja tanpa menghapus konfigurasi satu sama lain. Caranya menggunakan **Docker Compose Profiles**.
+Project ini menggunakan **Traefik v3** sebagai satu-satunya reverse proxy. Traefik menangani SSL termination, redirect HTTP→HTTPS, security headers, dan WebSocket.
 
 ### Perbandingan Nginx vs Traefik
 
-| Fitur | Nginx | Traefik |
+| Fitur | Nginx (dihapus) | Traefik (aktif) |
 |---|---|---|
 | Konfigurasi | File `.conf` statis | YAML hot-reload |
-| Dashboard | ❌ | ✅ `http://localhost:8088/dashboard/` |
+| Dashboard | ❌ | ✅ `http://<server>:8088/dashboard/` |
 | SSL | Manual (file cert) | Manual atau otomatis (Let's Encrypt) |
-| WebSocket | ✅ (manual headers) | ✅ (middleware) |
-| Security headers | ✅ `add_header` | ✅ middleware |
-| Cocok untuk | Setup sederhana & familiar | Lingkungan dynamic / microservices |
+| WebSocket | ✅ | ✅ (middleware) |
+| Security headers | ✅ | ✅ middleware |
+
+### File Konfigurasi Traefik
+
+| File | Fungsi |
+|---|---|
+| `traefik/traefik.yml` | Static config: entrypoints, providers, logging |
+| `traefik/dynamic/zammad.yml` | Dynamic config: router, middleware, TLS, service |
+| `traefik/ssl/zammad.crt` | SSL Certificate (wajib dibuat, tidak di-commit ke git) |
+| `traefik/ssl/zammad.key` | SSL Private Key (wajib dibuat, tidak di-commit ke git) |
+
+### Alur Request via Traefik
+
+```
+1. Client → Traefik (HTTPS 443)
+   └─ SSL handshake, TLS 1.2/1.3
+   └─ Security headers ditambahkan (HSTS, X-Frame-Options, dll)
+
+2. Traefik → zammad-nginx (HTTP 8080, network: proxy)
+   └─ Header X-Forwarded-Proto: https dikirim agar Zammad tahu asal HTTPS
+   └─ Komunikasi aman karena hanya dalam Docker internal network
+
+3. zammad-nginx → zammad-railsserver (HTTP, network: frontend)
+   └─ Proses request Ruby on Rails
+
+4. zammad-railsserver → database (network: backend, internal: true)
+   └─ Database tidak bisa diakses dari luar Docker network sama sekali
+```
 
 ---
 
-### 🟦 Menjalankan dengan Nginx (default lama)
+## 🚀 Cara Menjalankan (Docker Compose — Standalone)
 
+### 1. Clone repo & masuk ke direktori
 ```bash
-docker compose --profile nginx up -d
+git clone https://github.com/ecehceh/zammad-server-config.git ~/zammad
+cd ~/zammad
 ```
 
-Container yang aktif: `zammad-reverse-proxy-nginx`
-Konfigurasi: `nginx/conf.d/zammad.conf`
-
----
-
-### 🟪 Menjalankan dengan Traefik
-
-```bash
-docker compose --profile traefik up -d
-```
-
-Container yang aktif: `zammad-reverse-proxy-traefik`
-Konfigurasi: `traefik/traefik.yml` + `traefik/dynamic/zammad.yml`
-Dashboard Traefik: [http://localhost:8088/dashboard/](http://localhost:8088/dashboard/)
-
----
-
-### 🔁 Cara Berpindah (contoh: dari Nginx ke Traefik)
-
-```bash
-# 1. Hentikan service dengan profile yang sedang aktif
-docker compose --profile nginx down
-
-# 2. Jalankan dengan profile yang baru
-docker compose --profile traefik up -d
-```
-
-> ⚠️ **Jangan jalankan kedua profile sekaligus!** Keduanya menggunakan port 80 dan 443 sehingga akan konflik. Selalu hentikan satu sebelum menjalankan yang lain.
-
----
-
-### Catatan: SSL Certificate Digunakan Bersama
-
-Baik Nginx maupun Traefik menggunakan **sertifikat SSL yang sama** dari folder `nginx/ssl/`:
-
-```
-nginx/ssl/zammad.crt  →  Nginx:   /etc/nginx/ssl/zammad.crt
-                      →  Traefik: /etc/traefik/ssl/zammad.crt
-nginx/ssl/zammad.key  →  Nginx:   /etc/nginx/ssl/zammad.key
-                      →  Traefik: /etc/traefik/ssl/zammad.key
-```
-
-Sertifikat saat ini bersifat **self-signed** (cocok untuk development).
-Untuk produksi, ganti dengan sertifikat dari **Let's Encrypt** atau CA resmi.
-
----
-
-## 🚀 Cara Menjalankan
-
-### 1. Salin dan edit file environment
+### 2. Salin dan edit file environment
 ```bash
 cp .env.example .env
-# Edit .env — wajib ganti POSTGRES_PASSWORD & POSTGRESQL_PASS !
+nano .env   # Ganti POSTGRES_PASSWORD, POSTGRESQL_PASS, dan ZAMMAD_FQDN
 ```
 
-### 2. (Khusus Linux) Atur vm.max_map_count untuk Elasticsearch
+### 3. Generate SSL Certificate (self-signed)
+```bash
+mkdir -p traefik/ssl
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout traefik/ssl/zammad.key \
+  -out traefik/ssl/zammad.crt \
+  -subj "/CN=172.21.3.99" \
+  -addext "subjectAltName=IP:172.21.3.99"
+```
+> Ganti `172.21.3.99` dengan IP server Anda.
+
+### 4. Atur vm.max_map_count untuk Elasticsearch
 ```bash
 sudo sysctl -w vm.max_map_count=262144
 
@@ -418,23 +412,27 @@ sudo sysctl -w vm.max_map_count=262144
 echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
 ```
 
-### 3. Jalankan Docker Compose
+### 5. Jalankan Docker Compose
 ```bash
 docker compose up -d
 ```
 
 > Proses pertama kali membutuhkan waktu **5–10 menit** karena Zammad perlu menginisialisasi database dan mengindeks Elasticsearch.
 
-### 4. Pantau log inisialisasi
+### 6. Pantau log inisialisasi
 ```bash
 docker compose logs -f zammad-init   # Tunggu sampai "exited with code 0"
 docker compose logs -f               # Pantau semua service
 ```
 
-### 5. Akses Zammad
-```
-https://localhost    ← lewat HTTPS (reverse proxy port 443)
-```
+### 7. Akses Aplikasi
+| URL | Keterangan |
+|-----|------------|
+| `https://172.21.3.99` | Zammad (HTTPS via Traefik) |
+| `http://172.21.3.99` | Redirect otomatis ke HTTPS |
+| `http://172.21.3.99:8088` | Traefik Dashboard |
+
+> **Catatan Browser**: Karena sertifikat self-signed, browser akan menampilkan peringatan "Not Secure". Klik **Advanced → Proceed** untuk melanjutkan.
 
 ---
 
@@ -458,7 +456,7 @@ docker compose exec zammad-railsserver bash
 
 # Melihat log satu service
 docker compose logs -f zammad-nginx
-docker compose logs -f reverse-proxy-ssl
+docker compose logs -f traefik
 ```
 
 ---
@@ -476,11 +474,13 @@ docker compose logs -f reverse-proxy-ssl
 **Browser menampilkan "Not Secure" / SSL error:**
 - Certificate `zammad.crt` bersifat self-signed, browser akan menampilkan warning — ini normal untuk development
 - Untuk produksi, ganti dengan certificate dari **Let's Encrypt** atau CA resmi
+- Pastikan file `traefik/ssl/zammad.crt` dan `traefik/ssl/zammad.key` sudah ada
 
 **Zammad tidak bisa dibuka:**
-- Cek log reverse proxy: `docker compose logs reverse-proxy-ssl`
+- Cek log Traefik: `docker compose logs traefik`
 - Cek log nginx internal: `docker compose logs zammad-nginx`
 - Pastikan port 80 dan 443 tidak diblokir firewall
+- Pastikan rule `Host()` di `traefik/dynamic/zammad.yml` sesuai dengan IP/domain server
 
 ---
 
@@ -491,5 +491,3 @@ docker compose logs -f reverse-proxy-ssl
 - RAM: **minimal 4 GB** (rekomendasi 8 GB)
 - CPU: SSE4.2 support (hampir semua CPU modern)
 - Storage: minimal 10 GB
-#   z a m m a d - s e r v e r - c o n f i g  
- 
