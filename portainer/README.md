@@ -79,17 +79,17 @@ cd ~/zammad
 
 ```bash
 # Buat direktori SSL
-mkdir -p nginx/ssl
+mkdir -p traefik/ssl
 
 # Generate sertifikat self-signed untuk IP 172.21.3.99
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout nginx/ssl/zammad.key \
-  -out nginx/ssl/zammad.crt \
+  -keyout traefik/ssl/zammad.key \
+  -out traefik/ssl/zammad.crt \
   -subj "/C=ID/ST=Jakarta/L=Jakarta/O=BINUS/CN=172.21.3.99" \
   -addext "subjectAltName=IP:172.21.3.99"
 
 # Verifikasi sertifikat
-openssl x509 -in nginx/ssl/zammad.crt -noout -text | grep -E "Subject:|IP Address:"
+openssl x509 -in traefik/ssl/zammad.crt -noout -text | grep -E "Subject:|IP Address:"
 ```
 
 ---

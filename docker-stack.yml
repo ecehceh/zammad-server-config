@@ -352,7 +352,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic:/etc/traefik/dynamic:ro
-      - ./nginx/ssl:/etc/traefik/ssl:ro   # Sertifikat SSL (sama dengan Nginx)
+      - ./traefik/ssl:/etc/traefik/ssl:ro  # Sertifikat SSL
     networks:
       - proxy
       - frontend
